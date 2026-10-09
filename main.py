@@ -1,6 +1,5 @@
 import time
-import ujson
-
+import json
 import dht22
 import ldr
 import mq135
@@ -83,7 +82,7 @@ while True:
         "gas_digital": estado_mq135
     }
 
-    mensagem = ujson.dumps(dados)
+    mensagem = json.dumps(dados)
 
 
     print()
