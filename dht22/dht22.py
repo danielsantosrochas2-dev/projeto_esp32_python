@@ -9,8 +9,12 @@ import dht
 # GND  -> GND
 # ============================================================
 
+PINO_DHT22 = 15
 sensor = dht.DHT22(Pin(15))
 
+# ============================================================
+# Leitura do sensor
+# ============================================================
 
 def ler():
     try:
@@ -19,11 +23,11 @@ def ler():
         temperatura = sensor.temperature()
         umidade = sensor.humidity()
 
+        # Validacao dos resultados
         return temperatura, umidade
 
-    except Exception as erro:
+    except (OSError, ValueError) as erro:
 
-        print()
         print("Erro no DHT22:", erro)
 
         return None, None
