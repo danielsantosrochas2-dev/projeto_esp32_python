@@ -138,11 +138,6 @@ def ler():
 
     # Converter Pa para hPa
     pressao_hpa = pressao / 100.0
-    if not (-40 <= temperatura <= 85):
-     return None, None
-
-    if not (300 <= pressao_hpa <= 1100):
-     return None, None
 
     return round(temperatura, 2), round(pressao_hpa, 2)
 
