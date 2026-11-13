@@ -1,22 +1,24 @@
-from machine import Pin, ADC
+
+from machine import Pin
 
 
 # ============================================================
 # LDR
-# AO -> GPIO 32
+# DO -> GPIO 32
 # VCC -> 3V3
 # GND -> GND
 # ============================================================
 
 def criar():
 
-    sensor_adc = ADC(Pin(32))
-    sensor_adc.atten(ADC.ATTN_11DB)
+    sensor_digital = Pin(32, Pin.IN)
 
-    return sensor_adc
+    return sensor_digital
+
 
 # Inicializa o sensor
 sensor = criar()
+
 
 # REINICIALIZAÇÃO
 
@@ -24,7 +26,8 @@ def reinicializar():
     global sensor
     sensor = criar()
 
-    print("ADC do LDR reinicializado")
+    print("LDR digital reinicializado")
+
 
 # LEITURA DO LDR
 
@@ -32,7 +35,7 @@ def ler():
 
     try:
 
-        valor = sensor.read()
+        valor = sensor.value()
 
         return valor
 
@@ -43,8 +46,8 @@ def ler():
 
         return None
 
-# TESTE INDIVIDUAL
 
+# TESTE INDIVIDUAL
 
 if __name__ == "__main__":
 
@@ -58,7 +61,7 @@ if __name__ == "__main__":
 
             print()
             print("Leitura", numero)
-            print("Valor LDR:", valor)
+            print("Estado LDR:", valor)
 
             await asyncio.sleep_ms(1000)
 

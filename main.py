@@ -24,7 +24,7 @@ MQTT_TOPIC = b"estacao/dados"
 
 INTERVALO_LEITURA = 2000
 QUANTIDADE_TESTES = 5
-MQ135_ATIVO = False
+MQ135_ATIVO = True
 
 # ETAPA 1 - INICIALIZAR SENSORES
 
@@ -38,17 +38,18 @@ def inicializar_sensores():
     import dht22
     import bmp280
     import ldr
+    import mq135
 
     print("DHT22: inicializando")
     print("BMP280: inicializando")
     print("LDR: inicializando")
-    print("MQ-135: desativado")
+    print("MQ-135: inicializando")
 
-    return dht22, bmp280, ldr
+    return dht22, bmp280, ldr, mq135
 
 # ETAPA 2 - TESTAR SENSORES
 
-async def testar_sensores(dht22, bmp280, ldr):
+async def testar_sensores(dht22, bmp280, ldr, mq135):
 
     print()
     print("=========================")
@@ -67,7 +68,11 @@ async def testar_sensores(dht22, bmp280, ldr):
         temperatura_bmp, pressao = bmp280.ler()
 
         # LDR
-        luminosidade = ldr.ler()
+        estado_ldr = ldr.ler()
+
+        # MQ 135
+
+        valor_mq135, estado_mq135 = mq135.ler()
 
         # ORGANIZAR OS DADOS
 
@@ -76,7 +81,9 @@ async def testar_sensores(dht22, bmp280, ldr):
             "umidade": umidade,
             "temperatura_bmp": temperatura_bmp,
             "pressao": pressao,
-            "luminosidade": luminosidade
+            "luminosidade": estado_ldr,
+            "mq135": valor_mq135,
+            "mq135_digital": estado_mq135
         }
 
         # CONVERTER PARA JSON
@@ -167,13 +174,13 @@ async def main():
 
     # ETAPA 1 
 
-    dht22, bmp280, ldr = inicializar_sensores()
+    dht22, bmp280, ldr, mq135 = inicializar_sensores()
 
     # AGUARDA A PRIMEIRA CONVERSAO DO BMP280
     await asyncio.sleep_ms(150)
 
     # ETAPA 2
-    await testar_sensores(dht22, bmp280, ldr)
+    await testar_sensores(dht22, bmp280, ldr, mq135)
     
     print("Primeira etapa concluida")
 
@@ -206,7 +213,7 @@ async def main():
     print()
     print("TESTANDO SENSORES COM WIFI CONECTADO")
 
-    await testar_sensores(dht22, bmp280, ldr)
+    await testar_sensores(dht22, bmp280, ldr, mq135)
 
     # TESTE 5 - GERENCIAMENTO DA CONEXAO COM O MQTT  
 
@@ -245,7 +252,7 @@ async def main():
         # ETAPA 7 - PUBLICACAO CONTINUA
 
         try:
-            await publicar_dados(client, dht22, bmp280, ldr)
+            await publicar_dados(client, dht22, bmp280, ldr, mq135)
 
         finally:
             try:
@@ -298,7 +305,7 @@ async def conectar_mqtt():
 
 # ETAPA 7 - PUBLICACAO CONTINUA
 
-async def publicar_dados(client, dht22, bmp280, ldr):
+async def publicar_dados(client, dht22, bmp280, ldr, mq135):
 
     print()
     print("============================")
@@ -311,7 +318,8 @@ async def publicar_dados(client, dht22, bmp280, ldr):
 
         temperatura, umidade = dht22.ler()
         temperatura_bmp, pressao = bmp280.ler()
-        luminosidade = ldr.ler()
+        estado_ldr = ldr.ler()
+        valor_mq135, estado_mq135 = mq135.ler()
 
         # ORGANIZAR JSON
 
@@ -320,7 +328,9 @@ async def publicar_dados(client, dht22, bmp280, ldr):
             "umidade": umidade,
             "temperatura_bmp": temperatura_bmp,
             "pressao": pressao,
-            "luminosidade": luminosidade
+            "luminosidade": estado_ldr,
+            "mq135": valor_mq135,
+            "mq135_digital": estado_mq135
         }
 
         mensagem = json.dumps(dados)
