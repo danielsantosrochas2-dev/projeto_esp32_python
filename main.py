@@ -1,32 +1,61 @@
+
 import asyncio
 import json
 import network
 import time
 import machine
 import binascii
+
 from umqtt.simple import MQTTClient
 
-# DADOS DE CONEXAO MQTT -> EQMX
+
+# =========================================================
+# CONFIGURAÇÕES MQTT - EMQX
+# =========================================================
 
 MQTT_CLIENT_ID = (
     b"esp32-estacao-" +
-    binascii.hexlify(machine.unique_id()))
+    binascii.hexlify(machine.unique_id())
+)
 
 MQTT_BROKER = "xe4f1e16.ala.us-east-1.emqxsl.com"
 MQTT_PORT = 8883
 
+# Preencha com as credenciais atuais.
 MQTT_USER = b"teste"
 MQTT_PASSWORD = b"1234567"
 
 MQTT_TOPIC = b"estacao/dados"
 
-# CONFIGURAÇÕES
+
+# =========================================================
+# CONFIGURAÇÕES GERAIS
+# =========================================================
 
 INTERVALO_LEITURA = 2000
 QUANTIDADE_TESTES = 5
+
 MQ135_ATIVO = True
 
+# Calibração experimental do MQ-135
+CALIBRAR_MQ135_AO_INICIAR = True
+FORCAR_NOVA_CALIBRACAO = False
+
+PPM_REFERENCIA_MQ135 = 420.0
+QUANTIDADE_AMOSTRAS_CALIBRACAO = 120
+
+
+# =========================================================
+# CONFIGURAÇÕES WI-FI
+# =========================================================
+
+SSID = "Galaxy S23 27DE"
+SENHA = "16082014"
+
+
+# =========================================================
 # ETAPA 1 - INICIALIZAR SENSORES
+# =========================================================
 
 def inicializar_sensores():
 
@@ -40,14 +69,71 @@ def inicializar_sensores():
     import ldr
     import mq135
 
-    print("DHT22: inicializando")
-    print("BMP280: inicializando")
-    print("LDR: inicializando")
-    print("MQ-135: inicializando")
+    print("DHT22: inicializado")
+    print("BMP280: inicializado")
+    print("LDR: inicializado")
+    print("MQ-135: GPIO34 / divisor 15k + 15k")
+    print("MQ-135 digital: GPIO23")
 
     return dht22, bmp280, ldr, mq135
 
-# ETAPA 2 - TESTAR SENSORES
+
+# =========================================================
+# ETAPA 2 - LEITURA ORGANIZADA DOS SENSORES
+# =========================================================
+
+def ler_todos_sensores(dht22, bmp280, ldr, mq135):
+
+    # DHT22
+    temperatura, umidade = dht22.ler()
+
+    # BMP280
+    temperatura_bmp, pressao = bmp280.ler()
+
+    # LDR
+    luminosidade = ldr.ler()
+
+    # MQ135
+    if MQ135_ATIVO:
+        leitura_gas = mq135.ler()
+    else:
+        leitura_gas = {
+            "adc": None,
+            "digital": None,
+            "tensao_sensor": None,
+            "rs_r0": None,
+            "co2_equivalente_ppm_estimado": None,
+            "status_calibracao": "desativado"
+        }
+
+    dados = {
+        "temperatura": temperatura,
+        "umidade": umidade,
+
+        "temperatura_bmp280": temperatura_bmp,
+        "pressao": pressao,
+
+        "luminosidade": luminosidade,
+
+        "qualidade_ar": leitura_gas["adc"],
+        "gas_digital": leitura_gas["digital"],
+
+        "mq135_tensao_sensor": leitura_gas["tensao_sensor"],
+        "mq135_rs_r0": leitura_gas["rs_r0"],
+
+        "co2_equivalente_ppm_estimado":
+            leitura_gas["co2_equivalente_ppm_estimado"],
+
+        "mq135_status_calibracao":
+            leitura_gas["status_calibracao"]
+    }
+
+    return dados
+
+
+# =========================================================
+# ETAPA 3 - TESTAR SENSORES
+# =========================================================
 
 async def testar_sensores(dht22, bmp280, ldr, mq135):
 
@@ -56,55 +142,95 @@ async def testar_sensores(dht22, bmp280, ldr, mq135):
     print("TESTANDO SENSORES")
     print("=========================")
 
+    dados = None
+
     for numero in range(1, QUANTIDADE_TESTES + 1):
 
         print()
         print("Leitura:", numero)
 
-        # DHT22
-        temperatura, umidade = dht22.ler()
-
-        # BMP280
-        temperatura_bmp, pressao = bmp280.ler()
-
-        # LDR
-        estado_ldr = ldr.ler()
-
-        # MQ 135
-
-        valor_mq135, estado_mq135 = mq135.ler()
-
-        # ORGANIZAR OS DADOS
-
-        dados = {
-            "temperatura": temperatura,
-            "umidade": umidade,
-            "temperatura_bmp": temperatura_bmp,
-            "pressao": pressao,
-            "luminosidade": estado_ldr,
-            "mq135": valor_mq135,
-            "mq135_digital": estado_mq135
-        }
-
-        # CONVERTER PARA JSON
+        dados = ler_todos_sensores(
+            dht22,
+            bmp280,
+            ldr,
+            mq135
+        )
 
         mensagem = json.dumps(dados)
 
-        print()
         print("JSON:")
         print(mensagem)
-
-        # INTERVALO ENTRE LEITURAS
 
         if numero < QUANTIDADE_TESTES:
             await asyncio.sleep_ms(INTERVALO_LEITURA)
 
     return dados
 
-# ETAPA 3 - CONEXAO WIFI
 
-SSID = "Galaxy S23 27DE"
-SENHA = "16082014"
+# =========================================================
+# ETAPA 4 - CALIBRAÇÃO DO MQ135
+# =========================================================
+
+def preparar_calibracao_mq135(mq135):
+
+    if not MQ135_ATIVO:
+        print("MQ-135 desativado. Calibração ignorada.")
+        return
+
+    if not CALIBRAR_MQ135_AO_INICIAR:
+        print("Calibração automática desativada.")
+        return
+
+    print()
+    print("================================")
+    print("VERIFICANDO CALIBRACAO MQ-135")
+    print("================================")
+
+    try:
+
+        if FORCAR_NOVA_CALIBRACAO:
+            print("Apagando calibração anterior...")
+            mq135.apagar_calibracao()
+
+        calibracao_existente = mq135._carregar_calibracao()
+
+        if calibracao_existente is not None:
+
+            print("Calibração anterior encontrada.")
+            print(
+                "Referência:",
+                calibracao_existente["ppm_referencia"],
+                "PPM"
+            )
+
+            print("Mantendo calibração existente.")
+            return
+
+        print("Nenhuma calibração encontrada.")
+
+        print("Iniciando calibração experimental...")
+        print("Referência configurada:", PPM_REFERENCIA_MQ135)
+
+        resultado = mq135.calibrar_ambiente(
+            ppm_referencia=PPM_REFERENCIA_MQ135,
+            quantidade=QUANTIDADE_AMOSTRAS_CALIBRACAO
+        )
+
+        print("Calibração experimental concluída!")
+        print("Resultado:", json.dumps(resultado))
+
+    except Exception as erro:
+
+        print("Falha na calibração do MQ-135:")
+        print(erro)
+
+        print("O sensor continuará funcionando sem PPM.")
+        print("Verifique a alimentação e as leituras ADC.")
+
+
+# =========================================================
+# ETAPA 5 - CONEXÃO WI-FI
+# =========================================================
 
 async def conectar_wifi(ssid, senha):
 
@@ -117,152 +243,65 @@ async def conectar_wifi(ssid, senha):
     wifi.active(True)
 
     if not wifi.isconnected():
+
         wifi.connect(ssid, senha)
 
         inicio = time.ticks_ms()
 
         while not wifi.isconnected():
 
-            if time.ticks_diff(time.ticks_ms(), inicio) >= 15000:
-                print("Tempo limite de conexao atingido")
+            if time.ticks_diff(
+                time.ticks_ms(),
+                inicio
+            ) >= 15000:
+
+                print("Tempo limite de conexão atingido.")
                 return None
 
             await asyncio.sleep_ms(250)
 
     print("Wi-Fi conectado!")
     print("Endereço IP:", wifi.ifconfig()[0])
+
     return wifi
 
-# ETAPA 3.2 - TESTAR RECONEXÃO DO WIFI
+
+# =========================================================
+# ETAPA 5.1 - TESTAR RECONEXÃO WI-FI
+# =========================================================
 
 async def testar_reconexao_wifi(wifi, ssid, senha):
-    
+
     print()
     print("=========================")
     print("TESTANDO RECONEXAO WIFI")
     print("=========================")
 
-    # DESCONECTAR
     print("Desconectando Wi-Fi...")
 
     wifi.disconnect()
     wifi.active(False)
 
     await asyncio.sleep_ms(1000)
+
     print("Wi-Fi desconectado!")
-
-    # RECONECTAR
-
     print("Tentando reconectar...")
 
     wifi = await conectar_wifi(ssid, senha)
 
     if wifi is None:
-        print("Falha na reconexao")
+
+        print("Falha na reconexão.")
         return None
 
-    print("Reconexao realizada com sucesso!")
+    print("Reconexão realizada com sucesso!")
 
     return wifi
 
 
-# FUNÇÃO PRINCIPAL
-
-async def main():
-
-    print("Iniciando estacao metereologica")
-
-    # ETAPA 1 
-
-    dht22, bmp280, ldr, mq135 = inicializar_sensores()
-
-    # AGUARDA A PRIMEIRA CONVERSAO DO BMP280
-    await asyncio.sleep_ms(150)
-
-    # ETAPA 2
-    await testar_sensores(dht22, bmp280, ldr, mq135)
-    
-    print("Primeira etapa concluida")
-
-    # ETAPA 3 - TESTAR CONEXAO WIFI
-
-    wifi = await conectar_wifi(SSID, SENHA)
-
-    if wifi is None:
-        print("Falha na conexao Wi-Fi")
-        return
-
-    print("Primeira conexao Wi-Fi concluida")
-
-    # ETAPA 3.2 - RECONEXAO WIFI
-    
-    wifi = await testar_reconexao_wifi(wifi, SSID, SENHA)
-
-    if wifi is None:
-        print("Teste de reconexao falhou")
-        return
-
-    # ETAPA 4 - REINICIALIZAR ADC DO LDR
-
-    ldr.reinicializar()
-
-    await asyncio.sleep_ms(150)
-
-    # SEGUNDO TESTE DOS SENSORES
-
-    print()
-    print("TESTANDO SENSORES COM WIFI CONECTADO")
-
-    await testar_sensores(dht22, bmp280, ldr, mq135)
-
-    # TESTE 5 - GERENCIAMENTO DA CONEXAO COM O MQTT  
-
-    while True:
-
-        # VERIFICAR CONEXAO WIFI 
-
-        if wifi is None or not wifi.isconnected():
-
-            print("Wi-Fi desconectado!")
-            print("Tentando reconectar!")
-
-            nova_conexao = await conectar_wifi(SSID, SENHA)
-
-            if nova_conexao is None:
-
-                print("Nova Tentativa em 3 segundos")
-                await asyncio.sleep_ms(3000)
-                continue
-
-            wifi = nova_conexao
-
-            # REINICIALIZAR ADC APOS RECONEXAO
-            ldr.reinicializar()
-
-        # ETAPA 6 - CONECTAR AO MQTT
-
-        client = await conectar_mqtt()
-
-        if client is None:
-
-            print("Nova tentativa MQTT em 3 segundos")
-            await asyncio.sleep_ms(3000)
-            continue
-
-        # ETAPA 7 - PUBLICACAO CONTINUA
-
-        try:
-            await publicar_dados(client, dht22, bmp280, ldr, mq135)
-
-        finally:
-            try:
-                client.disconnect()
-            except OSError:
-                pass
-
-        await asyncio.sleep_ms(3000)
-
-# ETAPA 5 - CONEXAO MQTT    
+# =========================================================
+# ETAPA 6 - CONEXÃO MQTT
+# =========================================================
 
 async def conectar_mqtt():
 
@@ -291,21 +330,29 @@ async def conectar_mqtt():
         print("MQTT conectado!")
         print("Broker:", MQTT_BROKER)
         print("Porta:", MQTT_PORT)
-        print("Topico:", MQTT_TOPIC)
+        print("Tópico:", MQTT_TOPIC)
 
         return client
 
     except Exception as erro:
 
-        print()
-        print("Falha na conexao MQTT")
-        print("Erro:", erro)
+        print("Falha na conexão MQTT:")
+        print(erro)
 
         return None
 
-# ETAPA 7 - PUBLICACAO CONTINUA
 
-async def publicar_dados(client, dht22, bmp280, ldr, mq135):
+# =========================================================
+# ETAPA 7 - PUBLICAÇÃO CONTÍNUA
+# =========================================================
+
+async def publicar_dados(
+    client,
+    dht22,
+    bmp280,
+    ldr,
+    mq135
+):
 
     print()
     print("============================")
@@ -314,49 +361,187 @@ async def publicar_dados(client, dht22, bmp280, ldr, mq135):
 
     while True:
 
-        # LEITURA DOS SENSORES
-
-        temperatura, umidade = dht22.ler()
-        temperatura_bmp, pressao = bmp280.ler()
-        estado_ldr = ldr.ler()
-        valor_mq135, estado_mq135 = mq135.ler()
-
-        # ORGANIZAR JSON
-
-        dados = {
-            "temperatura": temperatura,
-            "umidade": umidade,
-            "temperatura_bmp": temperatura_bmp,
-            "pressao": pressao,
-            "luminosidade": estado_ldr,
-            "mq135": valor_mq135,
-            "mq135_digital": estado_mq135
-        }
-
-        mensagem = json.dumps(dados)
-
-        # PUBLICAR MQTT
-
         try:
+
+            # LEITURA DOS SENSORES
+
+            dados = ler_todos_sensores(
+                dht22,
+                bmp280,
+                ldr,
+                mq135
+            )
+
+            # CONVERTER PARA JSON
+
+            mensagem = json.dumps(dados)
+
+            # PUBLICAR MQTT
 
             client.publish(
                 MQTT_TOPIC,
                 mensagem.encode()
             )
 
-            print("JSON publicado:", mensagem)
+            print("JSON publicado:")
+            print(mensagem)
 
         except OSError as erro:
 
-            print("Erro na publicacao MQTT:", erro)
+            print("Erro na publicação MQTT:")
+            print(erro)
+
             return
 
-        # INTERVALO ASSINCRONO
+        except Exception as erro:
+
+            print("Erro na leitura dos sensores:")
+            print(erro)
 
         await asyncio.sleep_ms(INTERVALO_LEITURA)
 
+
+# =========================================================
+# FUNÇÃO PRINCIPAL
+# =========================================================
+
+async def main():
+
+    print()
+    print("================================")
+    print("INICIANDO ESTACAO METEOROLOGICA")
+    print("================================")
+
+    # ETAPA 1 - INICIALIZAR SENSORES
+
+    dht22, bmp280, ldr, mq135 = inicializar_sensores()
+
+    # AGUARDAR PRIMEIRA CONVERSÃO DO BMP280
+
+    await asyncio.sleep_ms(150)
+
+    # ETAPA 2 - TESTAR SENSORES
+
+    await testar_sensores(
+        dht22,
+        bmp280,
+        ldr,
+        mq135
+    )
+
+    print()
+    print("Primeira etapa concluída.")
+
+    # ETAPA 3 - CALIBRAR MQ135
+
+    preparar_calibracao_mq135(mq135)
+
+    # ETAPA 4 - CONECTAR WI-FI
+
+    wifi = await conectar_wifi(
+        SSID,
+        SENHA
+    )
+
+    if wifi is None:
+
+        print("Falha na conexão Wi-Fi.")
+        return
+
+    print("Primeira conexão Wi-Fi concluída.")
+
+    # ETAPA 4.1 - TESTAR RECONEXÃO
+
+    wifi = await testar_reconexao_wifi(
+        wifi,
+        SSID,
+        SENHA
+    )
+
+    if wifi is None:
+
+        print("Teste de reconexão falhou.")
+        return
+
+    # REINICIALIZAR ADC DO LDR
+
+    ldr.reinicializar()
+
+    await asyncio.sleep_ms(150)
+
+    # SEGUNDO TESTE DOS SENSORES
+
+    print()
+    print("TESTANDO SENSORES COM WIFI CONECTADO")
+
+    await testar_sensores(
+        dht22,
+        bmp280,
+        ldr,
+        mq135
+    )
+
+    # ETAPA 5 - GERENCIAMENTO MQTT
+
+    while True:
+
+        # VERIFICAR WI-FI
+
+        if wifi is None or not wifi.isconnected():
+
+            print("Wi-Fi desconectado!")
+            print("Tentando reconectar...")
+
+            wifi = await conectar_wifi(
+                SSID,
+                SENHA
+            )
+
+            if wifi is None:
+
+                print("Nova tentativa em 3 segundos.")
+                await asyncio.sleep_ms(3000)
+                continue
+
+            ldr.reinicializar()
+
+        # CONECTAR MQTT
+
+        client = await conectar_mqtt()
+
+        if client is None:
+
+            print("Nova tentativa MQTT em 3 segundos.")
+            await asyncio.sleep_ms(3000)
+            continue
+
+        # PUBLICAÇÃO CONTÍNUA
+
+        try:
+
+            await publicar_dados(
+                client,
+                dht22,
+                bmp280,
+                ldr,
+                mq135
+            )
+
+        finally:
+
+            try:
+                client.disconnect()
+            except OSError:
+                pass
+
+        await asyncio.sleep_ms(3000)
+
+
+# =========================================================
 # INICIAR FIRMWARE
+# =========================================================
 
 asyncio.run(main())
+
 
 
