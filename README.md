@@ -11,6 +11,8 @@ variáveis do ambiente por meio de sensores conectados ao ESP32, publica
 as leituras por MQTT e encaminha os dados para processamento e
 armazenamento na nuvem.
 
+Link do video youtube (https://www.youtube.com/watch?v=kg5lzbKT7Sg)
+
 > **Importante:** este README documenta a implementação e a montagem
 > descritas no projeto. Valores de calibração e estimativas do MQ-135
 > são experimentais e não devem ser interpretados como medições

@@ -1,3 +1,5 @@
+Link do video youtube (https://www.youtube.com/watch?v=kg5lzbKT7Sg)
+
 # API — Estação Meteorológica de Baixo Custo
 
 Backend de monitoramento ambiental desenvolvido em **Python e FastAPI** para receber leituras de uma estação baseada em **ESP32**, processá-las e disponibilizá-las para um dashboard.
