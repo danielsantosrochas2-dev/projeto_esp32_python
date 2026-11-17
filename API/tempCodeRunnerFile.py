@@ -1,0 +1,1 @@
+"co2_equivalente_ppm_estimado": Campo(0, 100000),

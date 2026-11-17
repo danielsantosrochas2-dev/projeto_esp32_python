@@ -1,0 +1,20 @@
+# Senhas e configurações
+.env
+.env.*
+
+# Ambiente virtual Python
+venv/
+.venv/
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# Dependências Node.js
+node_modules/
+
+# Dados locais
+leituras_nao_gravadas.jsonl
+
+# Arquivos do macOS
+.DS_Store

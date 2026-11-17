@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+supabase
+postgrest
+paho-mqtt
+python-dotenv
+certifi
