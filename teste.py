@@ -1,1 +1,0 @@
-print("ESP32 conectado com sucesso!")
